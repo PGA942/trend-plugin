@@ -1,0 +1,12 @@
+[package]
+name = "trend-plugin"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "共起辞書と前置一致だけで作るトレンドサジェスト(サーバー無し)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rasq-plugin-kit = { path = "../../kit" }
