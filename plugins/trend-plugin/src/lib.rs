@@ -6,9 +6,12 @@
 //! 3. フォールバック — 固定タグ(雑談 / RASQ / 写真)
 //!
 //! 重複と `recent` に既にある語は除き、`limit`(既定 6)で切る。
-use rasq_plugin_kit::{manifest, rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
+//!
+//! 契約は v0.13(`rasq-sdk-sample/docs/slots.md` §2.7、[`../../CONTRACT.md`](../../CONTRACT.md))。
+//! `plugin.manifest` の答えは同じディレクトリの `manifest.json` そのもの(`include_str!`。
+//! `rasq check` の往復検査が常に一致する)。
+use rasq_plugin_kit::{rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
 
-const ID: &str = "sample.trend";
 const DEFAULT_LIMIT: usize = 6;
 const MAX_LIMIT: usize = 50;
 
@@ -38,17 +41,14 @@ fn root() -> Value {
     rrl::column("root", vec![rrl::text("desc", "トレンドサジェストサンプル: 共起辞書 / 前置一致 / 固定タグ(サーバー無し)")])
 }
 
+/// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限はあちらを直す)。
+fn manifest() -> Value {
+    rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).expect("manifest.json")
+}
+
 fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
     match fn_name {
-        "plugin.manifest" => Ok(manifest(
-            ID,
-            "ローカルトレンド(サンプル)",
-            "0.1.0",
-            "trend",
-            "共起辞書と前置一致だけで作るトレンドサジェスト(サーバー無し)",
-            &["trend.suggest"],
-            &[],
-        )),
+        "plugin.manifest" => Ok(manifest()),
         "lifecycle" => Ok(json!({})),
         "trend.suggest" => Ok(suggest(&args)),
         _ => Err(unsupported(fn_name)),
@@ -123,6 +123,14 @@ mod tests {
             .iter()
             .map(|s| s["text"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    /// `plugin.manifest` は `manifest.json` そのもの(`rasq check` の往復検査と同じ突き合わせ)。
+    #[test]
+    fn manifest_matches_manifest_json() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        let file: Value = rasq_plugin_kit::serde_json::from_str(include_str!("../manifest.json")).unwrap();
+        assert_eq!(m, file);
     }
 
     #[test]
