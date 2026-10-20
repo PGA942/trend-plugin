@@ -10,7 +10,10 @@
 //! 契約は v0.13(`rasq-sdk-sample/docs/slots.md` §2.7、[`../../CONTRACT.md`](../../CONTRACT.md))。
 //! `plugin.manifest` の答えは同じディレクトリの `manifest.json` そのもの(`include_str!`。
 //! `rasq check` の往復検査が常に一致する)。
-use rasq_plugin_kit::{rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
+use rasq_plugin_kit::{i18n, rasq_plugin, rrl, serde_json::{json, Value}, unsupported};
+
+mod text;
+use text::TEXT;
 
 const DEFAULT_LIMIT: usize = 6;
 const MAX_LIMIT: usize = 50;
@@ -38,7 +41,7 @@ const TAGS: &[&str] = &[
 const FALLBACK: &[&str] = &["雑談", "RASQ", "写真"];
 
 fn root() -> Value {
-    rrl::column("root", vec![rrl::text("desc", "トレンドサジェストサンプル: 共起辞書 / 前置一致 / 固定タグ(サーバー無し)")])
+    rrl::column("root", vec![rrl::text("desc", TEXT.t(&i18n::current(), "root.desc"))])
 }
 
 /// `plugin.manifest` の答え = `manifest.json`(名前 / 版 / 説明 / 権限はあちらを直す)。
@@ -58,6 +61,7 @@ fn handle(fn_name: &str, args: Value) -> Result<Value, Value> {
 rasq_plugin! { scope: "sample.trend:main", root: root, call: handle }
 
 fn suggest(args: &Value) -> Value {
+    let loc = i18n::locale_of(args);
     let recent: Vec<&str> = args
         .get("recent")
         .and_then(Value::as_array)
@@ -88,7 +92,7 @@ fn suggest(args: &Value) -> Value {
         for (key, related) in COOCCUR {
             if key.eq_ignore_ascii_case(r) {
                 for t in *related {
-                    push(t, format!("「{r}」と一緒によく使われます"));
+                    push(t, TEXT.f(loc, "reason.cooccur", &[("tag", *r)]));
                 }
             }
         }
@@ -99,14 +103,14 @@ fn suggest(args: &Value) -> Value {
         if !q.is_empty() {
             for t in TAGS {
                 if t.to_lowercase().starts_with(&q) {
-                    push(t, format!("「{query}」で始まるタグ"));
+                    push(t, TEXT.f(loc, "reason.prefix", &[("query", query)]));
                 }
             }
         }
     }
     // 3. フォールバック(常に空にならないように)。
     for t in FALLBACK {
-        push(t, "定番のタグ".to_string());
+        push(t, TEXT.t(loc, "reason.fallback").to_string());
     }
 
     json!({ "suggestions": picked })
@@ -198,6 +202,33 @@ mod tests {
         assert_eq!(texts(Value::Null), ["雑談", "RASQ", "写真"]);
         // フォールバック語も recent にあるなら除外(それでも他の候補は出る)
         assert_eq!(texts(json!({"recent": ["雑談", "RASQ", "写真"]})), ["プラグイン", "AsTell", "カメラ", "散歩"]);
+    }
+
+    /// `reason` は `args.locale` の言語(タグそのものは辞書のまま)。
+    #[test]
+    fn reasons_follow_locale() {
+        let _ = i18n::take_misses();
+        let r = call_native("trend.suggest", json!({"locale": "en", "recent": ["打上会"]})).unwrap();
+        assert_eq!(r["suggestions"][0], json!({"text": "写真", "reason": "Often used with “打上会”"}));
+        let r = call_native("trend.suggest", json!({"locale": "zh-Hant-TW", "query": "ロ"})).unwrap();
+        assert_eq!(r["suggestions"][0], json!({"text": "ロケット発射", "reason": "以「ロ」開頭的標籤"}));
+        let r = call_native("trend.suggest", json!({"locale": "ko", "limit": 1})).unwrap();
+        assert_eq!(r["suggestions"][0], json!({"text": "雑談", "reason": "자주 쓰는 태그"}));
+        let r = call_native("trend.suggest", json!({"locale": "zh-Hans", "limit": 1})).unwrap();
+        assert_eq!(r["suggestions"][0]["reason"], "常用标签");
+        // locale が無ければ日本語
+        let r = call_native("trend.suggest", json!({"limit": 1})).unwrap();
+        assert_eq!(r["suggestions"][0]["reason"], "定番のタグ");
+        assert!(i18n::take_misses().is_empty());
+    }
+
+    #[test]
+    fn manifest_has_every_locale() {
+        let m = call_native("plugin.manifest", json!({})).unwrap();
+        for tag in ["en", "zh-Hans", "zh-Hant", "ko"] {
+            assert!(m["locales"][tag]["name"].is_string(), "{tag}");
+            assert!(m["locales"][tag]["description"].is_string(), "{tag}");
+        }
     }
 
     #[test]
